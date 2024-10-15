@@ -118,6 +118,9 @@ pub struct OutputDevice {
     drm_scanner: DrmScanner,
     surfaces: HashMap<crtc::Handle, Surface>,
     output_ids: HashMap<crtc::Handle, OutputId>,
+
+	connector_cache: HashMap<connector::Handle, OutputName>,
+
     // SAFETY: drop after all the objects used with them are dropped.
     // See https://github.com/Smithay/smithay/issues/1102.
     drm: DrmDevice,
@@ -594,6 +597,7 @@ impl Tty {
             render_node,
             drm,
             gbm,
+			connector_cache: HashMap::new(),
             drm_scanner: DrmScanner::new(),
             surfaces: HashMap::new(),
             output_ids: HashMap::new(),
@@ -766,6 +770,8 @@ impl Tty {
                 .insert((connector.handle(), crtc));
             return Ok(());
         }
+
+		device.connector_cache.insert(connector.handle(), output_name.clone());
 
         // This should be unique per CRTC connection, however currently we can call
         // connector_connected() multiple times for turning the output off and on.
@@ -1083,6 +1089,7 @@ impl Tty {
 
                 let conn = *conn;
                 device.non_desktop_connectors.remove(&(conn, crtc));
+				device.connector_cache.remove(&conn);
 
                 if let Some(lease_state) = &mut device.drm_lease_state {
                     lease_state.withdraw_connector(conn);
@@ -1095,6 +1102,7 @@ impl Tty {
         };
 
         debug!("disconnecting connector: {:?}", surface.name.connector);
+
 
         let output = niri
             .global_space
@@ -1548,12 +1556,12 @@ impl Tty {
         }
     }
 
-    fn refresh_ipc_outputs(&self, niri: &mut Niri) {
+    fn refresh_ipc_outputs(&mut self, niri: &mut Niri) {
         let _span = tracy_client::span!("Tty::refresh_ipc_outputs");
 
         let mut ipc_outputs = HashMap::new();
 
-        for (node, device) in &self.devices {
+        for (node, device) in &mut self.devices {
             for (connector, crtc) in device.drm_scanner.crtcs() {
                 let connector_name = format_connector_name(connector);
                 let physical_size = connector.size();
